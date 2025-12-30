@@ -1,0 +1,26 @@
+# Dependencies - KHÔNG BAO GIỜ được push lên git vì rất nặng
+node_modules/
+
+# Environment Variables - Chứa key private, tuyệt đối không push
+.env
+
+# Uploads - File do người dùng tải lên hoặc file sinh ra trong quá trình chạy
+uploads/
+
+# Logs - File log lỗi hoặc debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log
+
+# OS generated files - File rác của hệ điều hành
+.DS_Store
+Thumbs.db
+
+# Editor directories - File cấu hình của editor (VS Code, IntelliJ...)
+.vscode/
+.idea/
+
+# Optional: Data file (Xem giải thích bên dưới)
+# data.json
