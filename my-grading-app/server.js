@@ -1,39 +1,80 @@
 // server.js
 require('dotenv').config();
+
 const express = require('express');
-const multer = require('multer'); // Xử lý upload file
+const multer = require('multer');
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
+const path = require('path');
 const cors = require('cors');
 const OpenAI = require("openai");
 
-const app = express();
-const upload = multer({ dest: 'uploads/' }); // Thư mục tạm chứa file upload
+// ffmpeg
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
 
+// 🔴 BẮT BUỘC: set ffmpeg path (fix Cannot find ffmpeg)
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+const app = express();
+const upload = multer({ dest: 'uploads/' });
+
+// =======================
+// CONVERT WEBM → WAV
+// =======================
+function convertToWav(inputPath) {
+    return new Promise((resolve, reject) => {
+        const outputPath = inputPath + '.wav';
+
+        ffmpeg(inputPath)
+            .audioFrequency(16000)     // Chuẩn cho AI
+            .audioChannels(1)
+            .audioCodec('pcm_s16le')
+            .format('wav')
+            .on('end', () => {
+                console.log('Audio conversion completed');
+                resolve(outputPath);
+            })
+            .on('error', (err) => {
+                console.error('Error converting audio:', err);
+                reject(err);
+            })
+            .save(outputPath);
+    });
+}
+
+// =======================
+// CORS
+// =======================
 const allowedOrigins = [
-  "http://localhost:5173", 
-  "https://phoneme-checking.vercel.app", // THÊM LINK VERCEL FRONTEND CỦA BẠN
+    "http://localhost:5173",
+    "https://phoneme-checking.vercel.app",
 ];
 
 app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
+    origin: allowedOrigins,
+    credentials: true
 }));
+
 app.use(express.json());
 
-// --- CẤU HÌNH ---
+// =======================
+// CONFIG
+// =======================
 const API_KEY = process.env.OPENAI_API_KEY;
-const EXTERNAL_API_URL = "http://171.244.49.26:8000/process"; // API nhóm Dev
+const EXTERNAL_API_URL = "http://171.244.49.26:8000/process";
 
 if (!API_KEY) {
-    console.error("LỖI: Chưa cấu hình OPENAI_API_KEY");
+    console.error("❌ LỖI: Chưa cấu hình OPENAI_API_KEY");
     process.exit(1);
 }
 
 const openai = new OpenAI({ apiKey: API_KEY });
 
-// 1. SYSTEM INSTRUCTION (Giữ nguyên của bạn)
+// =======================
+// SYSTEM PROMPT
+// =======================
 const SYSTEM_PROMPT = `
 Role: Expert English Pronunciation Coach.
 
@@ -62,20 +103,23 @@ Output Requirements (Strict):
    - Summarize the learner's level based on the score.
    - Analyze specific errors found in the Data (Consonants, Vowels, Ending sounds).
    - Use specific word examples from the Data.
-   - Do NOT mention colors (Green/Red). Translate them to "rõ ràng", "chưa rõ", "sai", or "bị nuốt âm".
+   - Do NOT mention colors (Green/Red).
    - Keep the tone encouraging but formal.
 `;
 
-// --- LOGIC TÍNH ĐIỂM (Giữ nguyên logic cũ, chỉ đổi đầu vào) ---
+// =======================
+// SCORE CALCULATION
+// =======================
 function calculateScore(rawData) {
     try {
         let totalScore = 0;
         let totalPhonemes = 0;
         let leanData = [];
 
-        const dataToProcess = rawData.result || rawData; 
-
-        if (!Array.isArray(dataToProcess)) throw new Error("Dữ liệu từ API Audio không đúng định dạng mảng");
+        const dataToProcess = rawData.result || rawData;
+        if (!Array.isArray(dataToProcess)) {
+            throw new Error("Dữ liệu từ Audio API không đúng định dạng");
+        }
 
         dataToProcess.forEach(wordGroup => {
             const wordText = wordGroup[0];
@@ -86,8 +130,10 @@ function calculateScore(rawData) {
                 const sound = p[1];
                 const color = p[3];
                 totalPhonemes++;
+
                 if (color === 'green') totalScore += 1;
                 else if (color === 'yellow') totalScore += 0.5;
+
                 leanPhonemes.push([sound, color]);
             });
 
@@ -101,47 +147,61 @@ function calculateScore(rawData) {
         return { finalScore, leanData };
 
     } catch (err) {
-        throw new Error("Lỗi xử lý logic điểm số: " + err.message);
+        throw new Error("Lỗi xử lý điểm: " + err.message);
     }
 }
 
+// =======================
+// MAIN API
+// =======================
 app.post('/api/analyze', upload.single('audio'), async (req, res) => {
+    let convertedFilePath = null;
+
     try {
         const transcript = req.body.transcript;
         const audioFile = req.file;
 
         if (!audioFile || !transcript) {
-            return res.status(400).json({ error: "Thiếu file audio hoặc transcript" });
+            return res.status(400).json({ error: "Thiếu audio hoặc transcript" });
         }
 
-        console.log("1. Nhận request từ Frontend:", transcript);
+        console.log("1. Nhận request:", transcript);
+        console.log("   File:", audioFile.originalname, audioFile.mimetype);
+
+        let audioPathToSend = audioFile.path;
+        const isWebm =
+            audioFile.originalname?.endsWith('.webm') ||
+            audioFile.mimetype?.includes('webm');
+
+        if (isWebm) {
+            console.log("2. Converting webm → wav...");
+            audioPathToSend = await convertToWav(audioFile.path);
+            convertedFilePath = audioPathToSend;
+            console.log("   Converted:", audioPathToSend);
+        }
 
         const formData = new FormData();
-   
-        formData.append('audio', fs.createReadStream(audioFile.path)); 
-        formData.append('text', transcript); 
+        formData.append('audio', fs.createReadStream(audioPathToSend));
+        formData.append('text', transcript);
 
-        console.log("2. Đang gửi sang Audio Processing API...");
-        
-  
-        const audioApiResponse = await axios.post(EXTERNAL_API_URL, formData, {
-            headers: {
-                ...formData.getHeaders()
-            }
-        });
+        console.log("3. Gửi sang Audio Processing API...");
 
-        const rawJsonData = audioApiResponse.data;
-        console.log("3. Đã nhận dữ liệu thô từ Audio API");
+        const audioApiResponse = await axios.post(
+            EXTERNAL_API_URL,
+            formData,
+            { headers: formData.getHeaders() }
+        );
 
-        const { finalScore, leanData } = calculateScore(rawJsonData);
-        console.log(`4. Điểm toán: ${finalScore}/100`);
+        console.log("4. Nhận dữ liệu Audio API");
 
-        console.log("5. Đang gọi OpenAI...");
-        const minifiedJson = JSON.stringify(leanData);
-        const userPrompt = `Student Score: ${finalScore}\nPhonetic Data: ${minifiedJson}`;
+        const { finalScore, leanData } = calculateScore(audioApiResponse.data);
+        console.log(`   Score: ${finalScore}/100`);
+
+        console.log("5. Gọi OpenAI...");
+        const userPrompt = `Student Score: ${finalScore}\nPhonetic Data: ${JSON.stringify(leanData)}`;
 
         const gptResponse = await openai.chat.completions.create({
-            model: "gpt-4.1-mini", 
+            model: "gpt-4.1-mini",
             messages: [
                 { role: "system", content: SYSTEM_PROMPT },
                 { role: "user", content: userPrompt }
@@ -150,27 +210,39 @@ app.post('/api/analyze', upload.single('audio'), async (req, res) => {
         });
 
         const feedback = gptResponse.choices[0].message.content;
-        console.log(feedback)
 
-    
+        // Cleanup
         fs.unlinkSync(audioFile.path);
+        if (convertedFilePath && fs.existsSync(convertedFilePath)) {
+            fs.unlinkSync(convertedFilePath);
+        }
 
-        
         res.json({
             score: finalScore,
-            feedback: feedback
+            feedback
         });
 
     } catch (error) {
-        console.error("LỖI:", error.message);
-        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-        
-        res.status(500).json({ 
-            error: "Lỗi hệ thống", 
-            details: error.response ? error.response.data : error.message 
+        console.error("❌ LỖI:", error.message);
+
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        if (convertedFilePath && fs.existsSync(convertedFilePath)) {
+            fs.unlinkSync(convertedFilePath);
+        }
+
+        res.status(500).json({
+            error: "Lỗi hệ thống",
+            details: error.response ? error.response.data : error.message
         });
     }
 });
 
+// =======================
+// START SERVER
+// =======================
 const PORT = 5000;
-app.listen(PORT, () => console.log(`Server chạy tại port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`🚀 Server chạy tại port ${PORT}`);
+});
