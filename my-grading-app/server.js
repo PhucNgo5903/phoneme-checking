@@ -172,7 +172,7 @@ app.post('/api/analyze', upload.single('audio'), async (req, res) => {
     let leopard = null;
 
     try {
-        let transcript = req.body.transcript || req.body.text; // Hỗ trợ cả 2 key
+        let transcript = req.body.transcript || req.body.text; 
         const audioFile = req.file;
 
         if (!audioFile) {
@@ -181,34 +181,44 @@ app.post('/api/analyze', upload.single('audio'), async (req, res) => {
 
         console.log("1. Nhận file:", audioFile.originalname, audioFile.mimetype);
 
-        // --- XỬ LÝ CONVERT AUDIO (WEBM -> WAV) ---
+        // --- XỬ LÝ CONVERT AUDIO (WEBM / M4A -> WAV) ---
         let audioPathToProcess = audioFile.path;
+
+        // Kiểm tra WebM (Trình duyệt PC/Android)
         const isWebm =
             audioFile.originalname?.endsWith('.webm') ||
             audioFile.mimetype?.includes('webm');
 
-        // Luôn ưu tiên convert sang WAV 16kHz để chuẩn hóa cho cả Leopard và API Python
-        if (isWebm) {
-            console.log("2. Converting webm → wav (16kHz)...");
+        // Kiểm tra M4A (iPhone/iPad/Voice Recorder)
+        const isM4a =
+            audioFile.originalname?.toLowerCase().endsWith('.m4a') ||
+            audioFile.mimetype?.includes('audio/mp4') ||
+            audioFile.mimetype?.includes('audio/x-m4a');
+
+        // Nếu là WebM hoặc M4A thì đều đem đi convert sang WAV chuẩn
+        if (isWebm || isM4a) {
+            console.log(`2. Phát hiện định dạng ${isWebm ? 'WebM' : 'M4A'} -> Đang convert sang WAV (16kHz)...`);
+            
+            // Hàm convertToWav này dùng FFmpeg nên nó cân được cả webm và m4a
             audioPathToProcess = await convertToWav(audioFile.path);
+            
             convertedFilePath = audioPathToProcess;
-            console.log("   Converted path:", convertedFilePath);
+            console.log("   Đã convert xong:", convertedFilePath);
         }
 
         // --- TÍCH HỢP PICOVOICE LEOPARD (STT) ---
-        // Nếu không có transcript (Record V2), dùng Leopard để tạo
+        // (Phần dưới này giữ nguyên như cũ)
         if (!transcript || transcript.trim() === "") {
             console.log("2b. Không có Transcript -> Đang chạy Leopard STT...");
             try {
                 leopard = new Leopard(PICOVOICE_ACCESS_KEY);
-                // Dùng file đã convert (WAV 16kHz) để kết quả chính xác nhất
                 const result = leopard.processFile(audioPathToProcess);
                 transcript = result.transcript;
                 console.log(`-> Transcript tạo tự động: "${transcript}"`);
             } catch (err) {
                 console.error("Lỗi Leopard:", err);
                 throw new Error("Không thể nhận diện giọng nói: " + err.message);
-            }
+            }   
         } else {
             console.log(`-> Transcript có sẵn: "${transcript}"`);
         }
