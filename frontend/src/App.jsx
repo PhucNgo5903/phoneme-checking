@@ -1,8 +1,6 @@
 // frontend/src/App.jsx
 import { useState, useRef } from 'react';
 import axios from 'axios';
-// Bạn có thể xóa import './App.css' nếu muốn giao diện trắng tinh
-// import './App.css'; 
 
 function App() {
   const [file, setFile] = useState(null);
@@ -15,7 +13,9 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordedAudio, setRecordedAudio] = useState(null);
   const [recordingTime, setRecordingTime] = useState(0);
-  const [audioMode, setAudioMode] = useState('upload'); // 'upload' or 'record'
+  
+  // Audio Mode: 'upload' | 'record' | 'record-v2' (Auto)
+  const [audioMode, setAudioMode] = useState('upload'); 
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -23,10 +23,10 @@ function App() {
 
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
-    setRecordedAudio(null); // Clear recorded audio when uploading file
+    setRecordedAudio(null);
   };
 
-  // Start recording audio
+  // --- START RECORDING ---
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -40,6 +40,7 @@ function App() {
       };
 
       mediaRecorderRef.current.onstop = () => {
+        // Tạo Blob với định dạng webm chuẩn
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         setRecordedAudio(audioBlob);
         stream.getTracks().forEach(track => track.stop());
@@ -49,7 +50,6 @@ function App() {
       setIsRecording(true);
       setRecordingTime(0);
 
-      // Start timer
       timerRef.current = setInterval(() => {
         setRecordingTime(prev => prev + 1);
       }, 1000);
@@ -59,7 +59,7 @@ function App() {
     }
   };
 
-  // Stop recording audio
+  // --- STOP RECORDING ---
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
@@ -68,28 +68,34 @@ function App() {
     }
   };
 
-  // Format recording time
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Clear recorded audio
   const clearRecording = () => {
     setRecordedAudio(null);
     setRecordingTime(0);
   };
 
+  // --- SUBMIT ---
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Get audio source based on mode
-    const audioSource = audioMode === 'record' ? recordedAudio : file;
+    // Xác định nguồn audio
+    const audioSource = (audioMode === 'record' || audioMode === 'record-v2') ? recordedAudio : file;
 
-    if (!audioSource || !transcript) {
-      alert("Please enter transcript and provide audio (upload or record)!");
+    // Validate:
+    // 1. Phải có Audio
+    // 2. Nếu KHÔNG PHẢI chế độ Auto (V2) thì bắt buộc phải có Transcript
+    if (!audioSource) {
+      alert("Vui lòng chọn File hoặc Ghi âm!");
       return;
+    }
+    if (audioMode !== 'record-v2' && !transcript) {
+        alert("Vui lòng nhập Transcript!");
+        return;
     }
 
     setLoading(true);
@@ -98,22 +104,33 @@ function App() {
 
     const formData = new FormData();
 
-    // Handle both recorded audio (Blob) and uploaded file
-    if (audioMode === 'record') {
+    // Xử lý gửi file
+    if (audioMode === 'record' || audioMode === 'record-v2') {
+      // Đặt tên file là recording.webm để Backend xử lý đúng
       formData.append('audio', recordedAudio, 'recording.webm');
     } else {
       formData.append('audio', file);
     }
-    formData.append('transcript', transcript);
+
+    // Chỉ gửi transcript nếu không phải chế độ Auto
+    if (audioMode !== 'record-v2') {
+        formData.append('transcript', transcript);
+    }
 
     try {
-      // Gọi xuống Backend Node.js (Port 5000)
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
       const response = await axios.post(`${API_URL}/api/analyze`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      
       setResult(response.data);
+      
+      // Nếu Backend trả về transcript tự động (V2), điền vào ô cho đẹp
+      if (response.data.autoTranscript) {
+          setTranscript(response.data.autoTranscript);
+      }
+
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.error || "Error connecting to server");
@@ -122,7 +139,7 @@ function App() {
     }
   };
 
-  // CSS nội tuyến (Inline Styles) để bạn không cần file css riêng
+  // --- STYLES ---
   const styles = {
     container: { maxWidth: '700px', margin: '40px auto', fontFamily: 'Segoe UI, sans-serif', padding: '20px' },
     card: { background: '#fff', padding: '30px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' },
@@ -136,13 +153,15 @@ function App() {
       marginTop: '10px'
     },
     resultBox: { marginTop: '30px', padding: '20px', background: '#e8f6f3', borderRadius: '8px', borderLeft: '5px solid #2ecc71' },
-    // New styles for audio recording
+    
+    // Styles for mode toggle
     modeToggle: { display: 'flex', gap: '10px', marginBottom: '15px' },
     modeBtn: (active) => ({
       flex: 1, padding: '10px', border: 'none', borderRadius: '8px',
       background: active ? '#3498db' : '#ecf0f1', color: active ? 'white' : '#34495e',
-      cursor: 'pointer', fontWeight: '500', transition: 'all 0.2s'
+      cursor: 'pointer', fontWeight: '500', transition: 'all 0.2s', fontSize: '14px'
     }),
+    
     recordBtn: {
       width: '100%', padding: '14px', border: 'none', borderRadius: '8px',
       background: isRecording ? '#e74c3c' : '#27ae60', color: 'white',
@@ -163,22 +182,12 @@ function App() {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-
+        
 
         <form onSubmit={handleSubmit}>
+          
           <div style={styles.formGroup}>
-            <label style={styles.label}>1. Transcript (What you said):</label>
-            <textarea
-              style={{ ...styles.input, resize: 'vertical' }}
-              rows="3"
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-              placeholder="Ex: Today I will talk about ..."
-            />
-          </div>
-
-          <div style={styles.formGroup}>
-            <label style={styles.label}>2. Choose Audio Source:</label>
+            <label style={styles.label}>1. Choose Audio Source:</label>
 
             {/* Mode Toggle */}
             <div style={styles.modeToggle}>
@@ -187,14 +196,21 @@ function App() {
                 style={styles.modeBtn(audioMode === 'upload')}
                 onClick={() => setAudioMode('upload')}
               >
-                Upload File
+                Upload
               </button>
               <button
                 type="button"
                 style={styles.modeBtn(audioMode === 'record')}
                 onClick={() => setAudioMode('record')}
               >
-                Record Audio
+                Record (Text required)
+              </button>
+              <button
+                type="button"
+                style={styles.modeBtn(audioMode === 'record-v2')}
+                onClick={() => setAudioMode('record-v2')}
+              >
+                Speech to Text
               </button>
             </div>
 
@@ -203,8 +219,8 @@ function App() {
               <input type="file" accept="audio/*" onChange={handleFileChange} style={styles.input} />
             )}
 
-            {/* Record Mode */}
-            {audioMode === 'record' && (
+            {/* Record Modes */}
+            {(audioMode === 'record' || audioMode === 'record-v2') && (
               <div>
                 {!recordedAudio ? (
                   <>
@@ -214,9 +230,9 @@ function App() {
                       onClick={isRecording ? stopRecording : startRecording}
                     >
                       {isRecording ? (
-                        <><span style={{ fontSize: '20px' }}></span> Stop Recording ({formatTime(recordingTime)})</>
+                        <>⏹ Stop Recording ({formatTime(recordingTime)})</>
                       ) : (
-                        <><span style={{ fontSize: '20px' }}></span> Start Recording</>
+                        <>🎙 Start Recording</>
                       )}
                     </button>
                     {isRecording && (
@@ -237,7 +253,6 @@ function App() {
                   </div>
                 )}
 
-                {/* Audio Preview */}
                 {recordedAudio && (
                   <audio controls style={styles.audioPreview}>
                     <source src={URL.createObjectURL(recordedAudio)} type="audio/webm" />
@@ -246,6 +261,23 @@ function App() {
               </div>
             )}
           </div>
+
+          {/* Transcript Input - Ẩn nếu là chế độ Auto V2 */}
+          {audioMode !== 'record-v2' && (
+            <div style={styles.formGroup}>
+                <label style={styles.label}>2. Transcript (What you said):</label>
+                <textarea
+                style={{ ...styles.input, resize: 'vertical' }}
+                rows="3"
+                value={transcript}
+                onChange={(e) => setTranscript(e.target.value)}
+                placeholder="Ex: Today I will talk about ..."
+                />
+            </div>
+          )}
+
+          {/* Hướng dẫn cho chế độ V2 */}
+          
 
           <button type="submit" style={styles.button} disabled={loading}>
             {loading ? 'Analyzing...' : 'Analyze Pronunciation'}
@@ -256,6 +288,14 @@ function App() {
 
         {result && (
           <div style={styles.resultBox}>
+            {/* Hiển thị transcript AI nghe được */}
+            {result.autoTranscript && (
+                <div style={{marginBottom: '15px', paddingBottom: '10px', borderBottom: '1px solid #ccc'}}>
+                    <strong>Transcript: </strong> 
+                    <span style={{fontStyle: 'italic', color: '#555'}}>"{result.autoTranscript}"</span>
+                </div>
+            )}
+
             <h2 style={{ color: '#27ae60', marginTop: 0 }}>Score: {result.score}/100</h2>
             <p style={{ whiteSpace: 'pre-line', lineHeight: '1.6', color: '#2c3e50' }}>
               {result.feedback}
