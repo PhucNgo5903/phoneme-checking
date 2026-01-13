@@ -90,7 +90,7 @@ Role: Expert English Pronunciation Coach.
 
 Task:
 You will receive a pre-calculated "Student Score" (0-100) and a list of "Phonetic Data".
-Your goal is to analyze the data and write a formal feedback report (approx 80-100 words) in Vietnamese.
+Your goal is to analyze the data and write a formal feedback report (approx 80-100 words) in English.
 
 Input Data Format:
 [ "word", [ ["phoneme_arpabet", "color_verdict"], ... ] ]
@@ -113,7 +113,7 @@ Output Requirements (Strict):
    - Summarize the learner's level based on the score.
    - Analyze specific errors found in the Data (Consonants, Vowels, Ending sounds).
    - Use specific word examples from the Data.
-   - Do NOT mention colors (Green/Red). Translate them to "rõ ràng", "chưa rõ", "sai", or "bị nuốt âm".
+   - Do NOT mention colors (Green/Red). Translate them to "clear", "unclear", "incorrect", or "omitted".
    - Keep the tone encouraging but formal.
 `;
 
