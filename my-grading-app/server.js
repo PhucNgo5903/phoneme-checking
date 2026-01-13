@@ -128,9 +128,7 @@ function calculateScore(rawData) {
 
         const dataToProcess = rawData.result || rawData;
         
-        // Handle case where API returns null or invalid structure
         if (!dataToProcess || !Array.isArray(dataToProcess)) {
-             console.warn("Cảnh báo: API Audio trả về dữ liệu không chuẩn:", JSON.stringify(rawData));
              return { finalScore: 0, leanData: [] };
         }
 
@@ -140,14 +138,18 @@ function calculateScore(rawData) {
             let leanPhonemes = [];
 
             phonemes.forEach(p => {
-                const sound = p[1];
-                const color = p[3];
+                // API trả về: [ipa, arpabet, score, color]
+                const ipa = p[0];      
+                const arpabet = p[1];  
+                const score = p[2];    
+                const color = p[3];    
+                
                 totalPhonemes++;
-
                 if (color === 'green') totalScore += 1;
                 else if (color === 'yellow') totalScore += 0.5;
 
-                leanPhonemes.push([sound, color]);
+                // QUAN TRỌNG: Phải đẩy đủ 4 phần tử này vào để Frontend dùng
+                leanPhonemes.push([ipa, arpabet, score, color]); 
             });
 
             leanData.push([wordText, leanPhonemes]);
@@ -279,7 +281,8 @@ app.post('/api/analyze', upload.single('audio'), async (req, res) => {
         res.json({
             score: finalScore,
             feedback,
-            autoTranscript: transcript // Trả về text để frontend hiển thị
+            autoTranscript: transcript,
+            detailedResult: leanData // <--- THÊM DÒNG NÀY (để Frontend có dữ liệu vẽ màu)
         });
 
     } catch (error) {
